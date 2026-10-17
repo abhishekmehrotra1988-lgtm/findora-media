@@ -1,0 +1,67 @@
+name: Sync Findora Daily Catalogue
+on:
+  schedule:
+    - cron: '30 12 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: findora-catalogue
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve recent daily queues when publicly available
+        env:
+          QUEUE_REPO: abhishekmehrotra1988-lgtm/findora-affiliate-automation
+        run: |
+          python3 - <<'PY'
+          import datetime,urllib.request,json,subprocess,sys
+          from pathlib import Path
+          today=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5,minutes=30))).date()
+          fetched=0
+          for offset in range(0,4):
+              day=today-datetime.timedelta(days=offset)
+              url=f'https://raw.githubusercontent.com/abhishekmehrotra1988-lgtm/findora-affiliate-automation/main/queue/daily/{day.isoformat()}.json'
+              try:
+                  with urllib.request.urlopen(url,timeout=20) as response:
+                      if response.status!=200: continue
+                      payload=response.read(2_000_001)
+                      if len(payload)>2_000_000: raise ValueError('Queue exceeds 2 MB')
+                  parsed=json.loads(payload)
+                  if not isinstance(parsed,dict) or not isinstance(parsed.get('publications'),list): raise ValueError('Unexpected queue structure')
+                  Path('daily-queue.json').write_text(json.dumps(parsed),encoding='utf-8')
+                  subprocess.run([sys.executable,'scripts/queue_to_products.py','daily-queue.json','incoming.json'],check=True)
+                  subprocess.run([sys.executable,'scripts/append_products.py','incoming.json'],check=True)
+                  fetched+=1
+              except urllib.error.HTTPError as e:
+                  if e.code!=404: raise
+              finally:
+                  Path('daily-queue.json').unlink(missing_ok=True)
+                  Path('incoming.json').unlink(missing_ok=True)
+          print('QUEUES_PROCESSED=',fetched)
+          PY
+      - name: Check history and tests before committing
+        run: |
+          python3 tests/test_append_products.py
+          python3 tests/test_queue_integration.py
+          python3 - <<'PY'
+          import json,subprocess
+          previous=json.loads(subprocess.check_output(['git','show','HEAD:products.json']))
+          current=json.load(open('products.json',encoding='utf-8'))
+          before={p['url']:p for p in previous}
+          after={p['url']:p for p in current}
+          assert len(after)==len(current)
+          assert all(k in after and after[k]==v for k,v in before.items()),'Existing product removed or changed'
+          print('PASS: historical records preserved')
+          PY
+      - name: Commit only newly added products
+        run: |
+          git add products.json
+          if git diff --cached --quiet; then echo 'No new public queue products'; exit 0; fi
+          git config user.name 'findora-catalogue-bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Sync Findora daily queue products'
+          git push
