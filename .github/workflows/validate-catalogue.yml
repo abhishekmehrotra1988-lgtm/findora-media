@@ -1,0 +1,34 @@
+name: Validate Findora Catalogue
+on:
+  push:
+    paths:
+      - 'products.json'
+      - 'scripts/append_products.py'
+      - 'tests/test_append_products.py'
+      - '.github/workflows/validate-catalogue.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify catalogue JSON and unique links
+        run: |
+          python3 - <<'PY'
+          import json
+          from urllib.parse import urlsplit
+          with open('products.json',encoding='utf-8') as f: rows=json.load(f)
+          assert isinstance(rows,list) and len(rows)>=12
+          urls=set()
+          for row in rows:
+              assert row.get('title') and row.get('url')
+              u=urlsplit(row['url'])
+              assert u.scheme=='https' and u.netloc
+              assert row['url'] not in urls, 'Duplicate link: '+row['url']
+              urls.add(row['url'])
+          print('PASS:',len(rows),'products, no duplicate links')
+          PY
+      - name: Test append-only behaviour
+        run: python3 tests/test_append_products.py
