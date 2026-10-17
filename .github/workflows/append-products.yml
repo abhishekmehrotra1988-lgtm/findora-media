@@ -25,6 +25,20 @@ jobs:
           printf '%s' "$PRODUCTS_JSON" > incoming.json
       - name: Validate and append without deleting old products
         run: python3 scripts/append_products.py incoming.json
+      - name: Run catalogue regression tests
+        run: python3 tests/test_append_products.py
+      - name: Verify no historical products were removed
+        run: |
+          python3 - <<'PY'
+          import json,subprocess
+          before=json.loads(subprocess.check_output(['git','show','HEAD:products.json']))
+          after=json.load(open('products.json',encoding='utf-8'))
+          previous={p['url']:p for p in before}
+          current={p['url']:p for p in after}
+          assert len(current)==len(after),'Duplicate URLs'
+          assert all(url in current and current[url]==row for url,row in previous.items()),'Historical products changed or removed'
+          print('PASS: all',len(before),'previous products preserved')
+          PY
       - name: Commit catalogue changes if any
         run: |
           rm -f incoming.json
