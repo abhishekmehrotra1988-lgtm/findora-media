@@ -4,7 +4,11 @@ on:
     inputs:
       products_json:
         description: 'JSON array of products with title, url, category, date and optional image'
-        required: true
+        required: false
+        type: string
+      queue_json:
+        description: 'Optional Findora daily queue JSON with publications array'
+        required: false
         type: string
 permissions:
   contents: write
@@ -21,8 +25,17 @@ jobs:
       - name: Write incoming products
         env:
           PRODUCTS_JSON: ${{ inputs.products_json }}
+          QUEUE_JSON: ${{ inputs.queue_json }}
         run: |
-          printf '%s' "$PRODUCTS_JSON" > incoming.json
+          if [ -n "$QUEUE_JSON" ]; then
+            printf '%s' "$QUEUE_JSON" > daily-queue.json
+            python3 scripts/queue_to_products.py daily-queue.json incoming.json
+          elif [ -n "$PRODUCTS_JSON" ]; then
+            printf '%s' "$PRODUCTS_JSON" > incoming.json
+          else
+            echo 'Provide products_json or queue_json' >&2
+            exit 1
+          fi
       - name: Validate and append without deleting old products
         run: python3 scripts/append_products.py incoming.json
       - name: Run catalogue regression tests
@@ -41,7 +54,7 @@ jobs:
           PY
       - name: Commit catalogue changes if any
         run: |
-          rm -f incoming.json
+          rm -f incoming.json daily-queue.json
           git add products.json
           if git diff --cached --quiet; then
             echo "No new products"
