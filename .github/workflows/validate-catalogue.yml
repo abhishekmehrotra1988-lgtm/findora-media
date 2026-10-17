@@ -5,6 +5,8 @@ on:
       - 'products.json'
       - 'scripts/append_products.py'
       - 'tests/test_append_products.py'
+      - 'tests/test_queue_integration.py'
+      - 'scripts/queue_to_products.py'
       - '.github/workflows/validate-catalogue.yml'
   workflow_dispatch:
 permissions:
@@ -31,4 +33,6 @@ jobs:
           print('PASS:',len(rows),'products, no duplicate links')
           PY
       - name: Test append-only behaviour
-        run: python3 tests/test_append_products.py
+        run: |
+          python3 tests/test_append_products.py
+          python3 tests/test_queue_integration.py
